@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:alpine
+    container_name: casso-redis
+    ports:
+      - "6379:6379"
+    restart: always
+
+  app:
+    build: .
+    container_name: lanvadip-bot-app
+    depends_on:
+      - redis
+    env_file:
+      - .env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - DB_PATH=/app/data/bot.db
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/app/data
+    restart: always
+
+volumes:
+  data:
