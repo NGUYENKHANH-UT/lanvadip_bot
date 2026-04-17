@@ -21,9 +21,11 @@ type application struct {
 }
 
 type config struct {
-	addr    string
-	env     string
-	version string
+	addr     string
+	env      string
+	version  string
+	dbPath   string
+	redisURL string
 }
 
 func (app *application) mount() http.Handler {

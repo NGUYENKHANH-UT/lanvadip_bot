@@ -9,6 +9,8 @@ import (
 	"syscall"
 	"time"
 
+	"lanvadip-bot/internal/platform/cache"
+	database "lanvadip-bot/internal/platform/db"
 	"lanvadip-bot/internal/platform/env"
 
 	"go.uber.org/zap"
@@ -30,14 +32,28 @@ import (
 // @name						Authorization
 func main() {
 	cfg := config{
-		addr:    env.GetString("PORT", ":8080"),
-		env:     env.GetString("ENV", "development"),
-		version: env.GetString("VERSION", "0.0.1"),
+		addr:     env.GetString("PORT", ":8080"),
+		env:      env.GetString("ENV", "development"),
+		version:  env.GetString("VERSION", "0.0.1"),
+		dbPath:   env.GetString("DB_PATH", "./data/bot.db"),
+		redisURL: env.GetString("REDIS_URL", "redis://localhost:6379/0"),
 	}
 
 	// logger
 	logger := zap.Must(zap.NewProduction()).Sugar()
 	defer logger.Sync()
+
+	db, err := database.NewSQLite(cfg.dbPath)
+	if err != nil {
+		logger.Fatalw("Failed to connect to SQLite", "error", err)
+	}
+	defer db.Close()
+
+	redisClient, err := cache.NewRedis(cfg.redisURL)
+	if err != nil {
+		logger.Fatalw("Failed to connect to Redis", "error", err)
+	}
+	defer redisClient.Close()
 
 	app := &application{
 		config: cfg,
