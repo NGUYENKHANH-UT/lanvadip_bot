@@ -10,8 +10,6 @@
 *-journal
 
 /bin/
-api
-bot
 *.exe
 *.test
 *.out
