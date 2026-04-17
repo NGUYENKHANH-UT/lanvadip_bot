@@ -1,19 +1,23 @@
 package main
 
 import (
+	"fmt"
 	"lanvadip-bot/internal/handler"
 	"net/http"
 	"time"
 
+	"lanvadip-bot/docs"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	httpSwagger "github.com/swaggo/http-swagger/v2"
 	"go.uber.org/zap"
 )
 
 type application struct {
 	config config
 	logger *zap.SugaredLogger
-	server *http.Server // Thêm trường này để main.go có thể gọi .Shutdown()
+	server *http.Server
 }
 
 type config struct {
@@ -33,13 +37,18 @@ func (app *application) mount() http.Handler {
 
 	r.Route("/v1", func(r chi.Router) {
 		r.Route("/health", h.Health.HealthRoute)
+
+		docsURL := fmt.Sprintf("%s/swagger/doc.json", app.config.addr)
+		r.Get("/swagger/*", httpSwagger.Handler(httpSwagger.URL(docsURL)))
 	})
 
 	return r
 }
 
 func (app *application) run(mux http.Handler) error {
-	// Gán http.Server vào struct thay vì dùng biến cục bộ
+	docs.SwaggerInfo.Version = app.config.version
+	docs.SwaggerInfo.BasePath = "/v1"
+
 	app.server = &http.Server{
 		Addr:         app.config.addr,
 		Handler:      mux,

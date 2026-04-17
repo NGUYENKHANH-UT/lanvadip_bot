@@ -14,6 +14,20 @@ import (
 	"go.uber.org/zap"
 )
 
+//	@title			LanVaDip Bot API
+//	@description	API for LanVaDip Bot.
+//	@termsOfService	http://swagger.io/terms/
+
+//	@contact.name	API Support
+//	@contact.url	http://www.swagger.io/support
+//	@contact.email	support@swagger.io
+
+//	@license.name	Apache 2.0
+//	@license.url	http://www.apache.org/licenses/LICENSE-2.0.html
+
+// @securityDefinitions.apikey	ApiKeyAuth
+// @in							header
+// @name						Authorization
 func main() {
 	cfg := config{
 		addr:    env.GetString("PORT", ":8080"),
