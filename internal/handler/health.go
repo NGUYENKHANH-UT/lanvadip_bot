@@ -31,6 +31,17 @@ func (h *healthHandler) HealthRoute(r chi.Router) {
 	r.Get("/", h.healthCheck)
 }
 
+// healthCheck godoc
+//
+//	@Summary		Check the health of the API
+//	@Description	Check the health of the API and return status, environment, and version information
+//	@Tags			health
+//	@Accept			json
+//	@Produce		json
+//	@Success		200	{object}	map[string]string
+//	@Failure		500	{object}	error
+//
+//	@Router			/health [get]
 func (h *healthHandler) healthCheck(w http.ResponseWriter, r *http.Request) {
 	data := map[string]string{
 		"status":  "OK",

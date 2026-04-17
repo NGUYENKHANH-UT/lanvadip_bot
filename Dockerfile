@@ -7,7 +7,11 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 
+RUN go install github.com/swaggo/swag/cmd/swag@latest
+
 COPY . .
+
+RUN swag init -g cmd/api/main.go -d .
 RUN CGO_ENABLED=1 GOOS=linux go build -o api ./cmd/api
 
 FROM alpine:latest
