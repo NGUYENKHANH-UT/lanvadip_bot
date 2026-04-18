@@ -49,6 +49,8 @@ func (h *botHandler) HandleMessage(ctx context.Context, b *bot.Bot, update *mode
 		if err != nil {
 			h.logger.Errorw("failed to update user state to ORDERING", "error", err, "userID", userID)
 		}
+
+		h.aiService.ClearSession(userID)
 	}
 
 	if currentState == model.StateOrdering || currentState == model.StateStart {
@@ -65,8 +67,9 @@ func (h *botHandler) HandleMessage(ctx context.Context, b *bot.Bot, update *mode
 		}
 
 		_, err = b.SendMessage(ctx, &bot.SendMessageParams{
-			ChatID: update.Message.Chat.ID,
-			Text:   aiResponse,
+			ChatID:    update.Message.Chat.ID,
+			Text:      aiResponse,
+			ParseMode: models.ParseModeHTML,
 		})
 
 		if err != nil {
