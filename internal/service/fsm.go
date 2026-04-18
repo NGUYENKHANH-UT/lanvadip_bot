@@ -12,8 +12,10 @@ type FSMService interface {
 	ClearState(ctx context.Context, userID int64) error
 	SetOrderUser(ctx context.Context, orderCode int64, userID int64) error
 	GetOrderUser(ctx context.Context, orderCode int64) (int64, error)
-	SetUserPendingOrder(ctx context.Context, userID int64, orderCode int64) error // THÊM
+	SetUserPendingOrder(ctx context.Context, userID int64, orderCode int64) error
 	GetUserPendingOrder(ctx context.Context, userID int64) (int64, error)
+	SetOrderDeliveryInfo(ctx context.Context, orderCode int64, info string) error
+	GetOrderDeliveryInfo(ctx context.Context, orderCode int64) (string, error)
 }
 
 type redisFSMService struct {
@@ -43,7 +45,6 @@ func (s *redisFSMService) ClearState(ctx context.Context, userID int64) error {
 
 func (s *redisFSMService) SetOrderUser(ctx context.Context, orderCode int64, userID int64) error {
 	key := fmt.Sprintf("order_map:%d", orderCode)
-	// Lợi dụng hàm SetState có sẵn để lưu UserID dưới dạng chuỗi
 	return s.store.SetState(ctx, key, fmt.Sprintf("%d", userID))
 }
 
@@ -54,7 +55,7 @@ func (s *redisFSMService) GetOrderUser(ctx context.Context, orderCode int64) (in
 		return 0, fmt.Errorf("không tìm thấy user cho order")
 	}
 	var userID int64
-	fmt.Sscanf(valStr, "%d", &userID) // Ép ngược chuỗi về int64
+	fmt.Sscanf(valStr, "%d", &userID)
 	return userID, nil
 }
 
@@ -72,4 +73,14 @@ func (s *redisFSMService) GetUserPendingOrder(ctx context.Context, userID int64)
 	var orderCode int64
 	fmt.Sscanf(valStr, "%d", &orderCode)
 	return orderCode, nil
+}
+
+func (s *redisFSMService) SetOrderDeliveryInfo(ctx context.Context, orderCode int64, info string) error {
+	key := fmt.Sprintf("delivery_info:%d", orderCode)
+	return s.store.SetState(ctx, key, info)
+}
+
+func (s *redisFSMService) GetOrderDeliveryInfo(ctx context.Context, orderCode int64) (string, error) {
+	key := fmt.Sprintf("delivery_info:%d", orderCode)
+	return s.store.GetState(ctx, key)
 }
