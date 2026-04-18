@@ -1,13 +1,19 @@
 package store
 
-import "github.com/redis/go-redis/v9"
+import (
+	"database/sql"
+
+	"github.com/redis/go-redis/v9"
+)
 
 type Storage struct {
-	FSM FSMStore
+	FSM  FSMStore
+	Menu MenuStore
 }
 
-func NewStorage(client *redis.Client) Storage {
+func NewStorage(client *redis.Client, db *sql.DB) Storage {
 	return Storage{
-		FSM: NewRedisFSMStore(client),
+		FSM:  NewRedisFSMStore(client),
+		Menu: NewMenuStore(db),
 	}
 }

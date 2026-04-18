@@ -2,16 +2,10 @@ package store
 
 import (
 	"context"
+	"lanvadip-bot/internal/model"
 	"time"
 
 	"github.com/redis/go-redis/v9"
-)
-
-const (
-	StateStart           = "START"
-	StateOrdering        = "ORDERING"
-	StateAwaitingPayment = "AWAITING_PAYMENT"
-	StateCompleted       = "COMPLETED"
 )
 
 type FSMStore interface {
@@ -37,7 +31,7 @@ func (s *redisFSMStore) SetState(ctx context.Context, key, state string) error {
 func (s *redisFSMStore) GetState(ctx context.Context, key string) (string, error) {
 	state, err := s.client.Get(ctx, key).Result()
 	if err == redis.Nil {
-		return StateStart, nil
+		return model.StateStart, nil
 	}
 	if err != nil {
 		return "", err

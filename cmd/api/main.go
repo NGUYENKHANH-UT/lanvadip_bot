@@ -15,7 +15,9 @@ import (
 	"lanvadip-bot/internal/service"
 	"lanvadip-bot/internal/store"
 
+	"github.com/google/generative-ai-go/genai"
 	"go.uber.org/zap"
+	"google.golang.org/api/option"
 )
 
 //	@title			LanVaDip Bot API
@@ -45,6 +47,9 @@ func main() {
 	logger := zap.Must(zap.NewProduction()).Sugar()
 	defer logger.Sync()
 
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
 	db, err := database.NewSQLite(cfg.dbPath)
 	if err != nil {
 		logger.Fatalw("Failed to connect to SQLite", "error", err)
@@ -57,16 +62,23 @@ func main() {
 	}
 	defer redisClient.Close()
 
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer cancel()
-
 	token := env.GetString("TELEGRAM_BOT_TOKEN", "")
 	if token == "" {
 		logger.Fatal("TELEGRAM_BOT_TOKEN is not set")
 	}
 
-	store := store.NewStorage(redisClient)
-	service := service.NewService(store)
+	apiKey := env.GetString("GEMINI_API_KEY", "")
+	if apiKey == "" {
+		logger.Fatal("GEMINI_API_KEY is not set")
+	}
+	aiClient, err := genai.NewClient(context.Background(), option.WithAPIKey(apiKey))
+	if err != nil {
+		logger.Fatalw("Failed to connect to Gemini", "error", err)
+	}
+	defer aiClient.Close()
+
+	store := store.NewStorage(redisClient, db)
+	service := service.NewService(store, aiClient, logger)
 
 	app := &application{
 		config:  cfg,
@@ -74,7 +86,7 @@ func main() {
 		service: service,
 	}
 
-	b, err := setupBot(token, logger, app.service.FSM)
+	b, err := setupBot(token, logger, app.service.FSM, app.service.AI)
 	if err != nil {
 		logger.Fatalw("Failed to initialize bot", "error", err)
 	}

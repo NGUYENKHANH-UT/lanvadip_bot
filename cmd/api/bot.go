@@ -8,8 +8,8 @@ import (
 	"go.uber.org/zap"
 )
 
-func setupBot(token string, logger *zap.SugaredLogger, fsmService service.FSMService) (*bot.Bot, error) {
-	botHandler := handler.NewBotHandler(logger, fsmService)
+func setupBot(token string, logger *zap.SugaredLogger, fsmService service.FSMService, aiService service.AIService) (*bot.Bot, error) {
+	botHandler := handler.NewBotHandler(logger, fsmService, aiService)
 
 	opts := []bot.Option{
 		bot.WithDefaultHandler(botHandler.HandleMessage),
