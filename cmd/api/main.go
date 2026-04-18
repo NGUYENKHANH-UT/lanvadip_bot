@@ -12,6 +12,8 @@ import (
 	"lanvadip-bot/internal/platform/cache"
 	database "lanvadip-bot/internal/platform/db"
 	"lanvadip-bot/internal/platform/env"
+	"lanvadip-bot/internal/service"
+	"lanvadip-bot/internal/store"
 
 	"go.uber.org/zap"
 )
@@ -55,11 +57,6 @@ func main() {
 	}
 	defer redisClient.Close()
 
-	app := &application{
-		config: cfg,
-		logger: logger,
-	}
-
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
@@ -68,7 +65,16 @@ func main() {
 		logger.Fatal("TELEGRAM_BOT_TOKEN is not set")
 	}
 
-	b, err := setupBot(token, logger)
+	store := store.NewStorage(redisClient)
+	service := service.NewService(store)
+
+	app := &application{
+		config:  cfg,
+		logger:  logger,
+		service: service,
+	}
+
+	b, err := setupBot(token, logger, app.service.FSM)
 	if err != nil {
 		logger.Fatalw("Failed to initialize bot", "error", err)
 	}

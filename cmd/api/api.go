@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"lanvadip-bot/internal/handler"
+	"lanvadip-bot/internal/service"
 	"net/http"
 	"time"
 
@@ -15,9 +16,10 @@ import (
 )
 
 type application struct {
-	config config
-	logger *zap.SugaredLogger
-	server *http.Server
+	config  config
+	logger  *zap.SugaredLogger
+	server  *http.Server
+	service service.Service
 }
 
 type config struct {
