@@ -16,6 +16,7 @@ import (
 	"lanvadip-bot/internal/store"
 
 	"github.com/google/generative-ai-go/genai"
+	"github.com/payOSHQ/payos-lib-golang/v2"
 	"go.uber.org/zap"
 	"google.golang.org/api/option"
 )
@@ -77,19 +78,37 @@ func main() {
 	}
 	defer aiClient.Close()
 
+	payosClientID := env.GetString("PAYOS_CLIENT_ID", "")
+	payosApiKey := env.GetString("PAYOS_API_KEY", "")
+	payosChecksumKey := env.GetString("PAYOS_CHECKSUM_KEY", "")
+	if payosClientID == "" || payosApiKey == "" || payosChecksumKey == "" {
+		logger.Fatal("PayOS keys are not set properly")
+	}
+	payosClient, err := payos.NewPayOS(&payos.PayOSOptions{
+		ClientId:    payosClientID,
+		ApiKey:      payosApiKey,
+		ChecksumKey: payosChecksumKey,
+	})
+
 	store := store.NewStorage(redisClient, db)
-	service := service.NewService(store, aiClient, logger)
+	service := service.NewService(store, aiClient, logger, payosClient)
+
+	service.PaymentWorker.Start(ctx, 3)
 
 	app := &application{
-		config:  cfg,
-		logger:  logger,
-		service: service,
+		config:        cfg,
+		logger:        logger,
+		service:       service,
+		payosClient:   payosClient,
+		paymentWorker: service.PaymentWorker,
 	}
 
 	b, err := setupBot(token, logger, app.service.FSM, app.service.AI)
 	if err != nil {
 		logger.Fatalw("Failed to initialize bot", "error", err)
 	}
+
+	app.service.PaymentWorker.SetBot(b)
 
 	var wg sync.WaitGroup
 

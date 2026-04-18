@@ -10,6 +10,7 @@ import (
 	"lanvadip-bot/internal/store"
 
 	"github.com/google/generative-ai-go/genai"
+	"github.com/payOSHQ/payos-lib-golang/v2"
 	"go.uber.org/zap"
 )
 
@@ -17,17 +18,21 @@ type AIService interface {
 	AnalyzeAndRespond(ctx context.Context, userID int64, message string) (string, error)
 	ClearSession(userID int64)
 	Close()
+	CancelPendingOrder(ctx context.Context, userID int64)
 }
 
 type aiService struct {
-	client    *genai.Client
-	model     *genai.GenerativeModel
-	menuStore store.MenuStore
-	logger    *zap.SugaredLogger
-	sessions  sync.Map
+	client      *genai.Client
+	model       *genai.GenerativeModel
+	menuStore   store.MenuStore
+	logger      *zap.SugaredLogger
+	sessions    sync.Map
+	payosClient *payos.PayOS
+	fsmService  FSMService
+	orderStore  store.OrderStore
 }
 
-func NewAIService(client *genai.Client, menuStore store.MenuStore, logger *zap.SugaredLogger) AIService {
+func NewAIService(client *genai.Client, menuStore store.MenuStore, logger *zap.SugaredLogger, payosClient *payos.PayOS, fsmService FSMService, orderStore store.OrderStore) AIService {
 	model := client.GenerativeModel("gemini-2.5-flash-lite")
 
 	temp := float32(0.2)
@@ -36,11 +41,12 @@ func NewAIService(client *genai.Client, menuStore store.MenuStore, logger *zap.S
 	model.SystemInstruction = &genai.Content{Parts: []genai.Part{genai.Text(
 		`Bạn là nhân viên nhận order siêu dễ thương của quán "Trà sữa Lan và Địp".
 Xưng hô: Gọi mình là "Quán" hoặc "Dạ", gọi khách là "Cục dàng".
-Nhiệm vụ: Chào hỏi, tư vấn menu, nhận order và chốt đơn.
+Nhiệm vụ: Chào hỏi, tư vấn menu, nhận order và CHỐT ĐƠN.
 LƯU Ý QUAN TRỌNG: 
-- Khi dùng get_menu, hệ thống sẽ trả về một chuỗi Menu đã được định dạng HTML sẵn. BẠN BẮT BUỘC PHẢI IN Y HỆT ĐOẠN HTML ĐÓ RA MÀN HÌNH, tuyệt đối không được tự ý sửa đổi, xóa bớt thẻ hoặc viết lại theo ý mình.
-- BẤT CỨ KHI NÀO khách báo chọn món, thêm món, bớt món, hoặc đổi ý, bạn PHẢI gọi hàm calculate_total và truyền vào TOÀN BỘ danh sách món mà khách đang chốt. 
-- Hãy luôn chú ý đến [Thời gian hiện tại] để giao tiếp tự nhiên.`,
+- Khi có kết quả từ get_menu, BẮT BUỘC PHẢI in y hệt đoạn HTML hệ thống đưa.
+- BẤT CỨ KHI NÀO khách báo chọn món, thêm món, bớt món, bạn PHẢI gọi hàm calculate_total và truyền vào TOÀN BỘ danh sách món. SAU ĐÓ IN CHI TIẾT HÓA ĐƠN ĐÓ RA.
+- KHI KHÁCH ĐỒNG Ý CHỐT ĐƠN (ví dụ: "chốt", "ok lấy đi", "tính tiền"), bạn BẮT BUỘC gọi hàm checkout để tạo mã QR thanh toán.
+- Sau khi gọi checkout, hãy gửi Link thanh toán cho khách và nói rõ: "Cục dàng nhấn vào link để quét mã QR thanh toán nha!".`,
 	)}}
 
 	model.Tools = []*genai.Tool{
@@ -78,10 +84,13 @@ LƯU Ý QUAN TRỌNG:
 	}
 
 	return &aiService{
-		client:    client,
-		model:     model,
-		menuStore: menuStore,
-		logger:    logger,
+		client:      client,
+		model:       model,
+		menuStore:   menuStore,
+		logger:      logger,
+		payosClient: payosClient,
+		fsmService:  fsmService,
+		orderStore:  orderStore,
 	}
 }
 
@@ -173,9 +182,78 @@ func (s *aiService) processCalculateTotal(ctx context.Context, args map[string]i
 	return receipt, nil
 }
 
+func (s *aiService) processCheckout(ctx context.Context, args map[string]interface{}, userID int64) (string, error) {
+	billText, _ := s.processCalculateTotal(ctx, args)
+
+	ordersRaw, _ := args["orders"].([]interface{})
+	items, _ := s.menuStore.GetAvailableMenu(ctx)
+	menuMap := make(map[string]model.MenuItem)
+	for _, item := range items {
+		menuMap[item.ItemCode] = item
+	}
+	var total int
+	for _, o := range ordersRaw {
+		orderData, _ := o.(map[string]interface{})
+		code, _ := orderData["item_code"].(string)
+		size, _ := orderData["size"].(string)
+		qty := int(orderData["quantity"].(float64))
+		price := menuMap[code].PriceM
+		if size == "L" {
+			price = menuMap[code].PriceL
+		}
+		total += price * qty
+	}
+
+	if total == 0 {
+		return "Giỏ hàng trống, không thể chốt đơn.", nil
+	}
+
+	orderCode := time.Now().Unix()
+	s.fsmService.SetOrderUser(ctx, orderCode, userID)
+	s.fsmService.SetUserPendingOrder(ctx, userID, orderCode)
+
+	var dbItems []model.OrderItem
+	for _, o := range ordersRaw {
+		orderData, _ := o.(map[string]interface{})
+		code, _ := orderData["item_code"].(string)
+		size, _ := orderData["size"].(string)
+		qty := int(orderData["quantity"].(float64))
+		price := menuMap[code].PriceM
+		if size == "L" {
+			price = menuMap[code].PriceL
+		}
+
+		dbItems = append(dbItems, model.OrderItem{
+			ItemCode: code, Size: size, Quantity: qty, Price: price,
+		})
+	}
+
+	err := s.orderStore.CreateOrder(ctx, orderCode, userID, total, dbItems)
+	if err != nil {
+		s.logger.Errorw("Failed to save order to DB", "error", err)
+		return "Hệ thống lỗi khi lưu đơn hàng, cục dàng chờ xíu thử lại nha!", nil
+	}
+
+	req := payos.CreatePaymentLinkRequest{
+		OrderCode:   orderCode,
+		Amount:      total,
+		Description: "Thanh toan tra sua",
+		CancelUrl:   "https://t.me/lanvadip_bot?start=cancel",
+		ReturnUrl:   "https://t.me/lanvadip_bot", // URL khi thanh toán thành công
+	}
+
+	res, err := s.payosClient.PaymentRequests.Create(ctx, req)
+	if err != nil {
+		return "", fmt.Errorf("Error call API PayOS: %w", err)
+	}
+
+	s.fsmService.SetState(ctx, userID, model.StateAwaitingPayment)
+
+	return fmt.Sprintf("%s\n\n[HỆ THỐNG]: Đã tạo link thanh toán thành công. Yêu cầu báo khách click vào link này để quét mã QR: %s", billText, res.CheckoutUrl), nil
+}
+
 func (s *aiService) AnalyzeAndRespond(ctx context.Context, userID int64, message string) (string, error) {
 	var session *genai.ChatSession
-
 	if existingSession, ok := s.sessions.Load(userID); ok {
 		session = existingSession.(*genai.ChatSession)
 	} else {
@@ -202,15 +280,14 @@ func (s *aiService) AnalyzeAndRespond(ctx context.Context, userID int64, message
 				result, errCall = s.processGetMenu(ctx)
 			case "calculate_total":
 				result, errCall = s.processCalculateTotal(ctx, fnCall.Args)
+			case "checkout":
+				result, errCall = s.processCheckout(ctx, fnCall.Args, userID)
 			default:
 				result = "system error: invalid function name"
 			}
 
 			if errCall != nil {
-				result = fmt.Sprintf("system error occurred during function execution: %v", errCall)
-				s.logger.Error(result)
-			} else if result == nil {
-				result = "system error: function returned nil result"
+				result = fmt.Sprintf("system error: %v", errCall)
 				s.logger.Error(result)
 			}
 
@@ -219,7 +296,7 @@ func (s *aiService) AnalyzeAndRespond(ctx context.Context, userID int64, message
 				Response: map[string]interface{}{"result": result},
 			})
 			if err != nil {
-				return "", fmt.Errorf("failed to send function response back to Gemini API: %w", err)
+				return "", err
 			}
 		}
 	}
@@ -229,4 +306,26 @@ func (s *aiService) AnalyzeAndRespond(ctx context.Context, userID int64, message
 	}
 
 	return fmt.Sprintf("%v", resp.Candidates[0].Content.Parts[0]), nil
+}
+
+func (s *aiService) CancelPendingOrder(ctx context.Context, userID int64) {
+	// Lấy mã đơn đang nợ
+	orderCode, err := s.fsmService.GetUserPendingOrder(ctx, userID)
+	if err != nil || orderCode == 0 {
+		return
+	}
+
+	// 1. CẬP NHẬT DATABASE THÀNH CANCELLED
+	err = s.orderStore.UpdateOrderStatus(ctx, orderCode, "CANCELLED")
+	if err != nil {
+		s.logger.Errorw("Lỗi hủy DB", "err", err)
+	}
+
+	// 2. CHỦ ĐỘNG HỦY LINK TRÊN PAYOS
+	// (Kệ lỗi nếu link đã bị hủy trước đó trên web)
+	cancelMessage := "Khách hủy đơn"
+	_, _ = s.payosClient.PaymentRequests.Cancel(ctx, int(orderCode), &cancelMessage)
+
+	// 3. XÓA VẾT NỢ TRONG REDIS
+	s.fsmService.SetUserPendingOrder(ctx, userID, 0)
 }
