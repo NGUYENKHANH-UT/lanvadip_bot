@@ -15,10 +15,9 @@ import (
 	"lanvadip-bot/internal/service"
 	"lanvadip-bot/internal/store"
 
-	"github.com/google/generative-ai-go/genai"
 	"github.com/payOSHQ/payos-lib-golang/v2"
+	"github.com/sashabaranov/go-openai"
 	"go.uber.org/zap"
-	"google.golang.org/api/option"
 )
 
 //	@title			LanVaDip Bot API
@@ -68,15 +67,14 @@ func main() {
 		logger.Fatal("TELEGRAM_BOT_TOKEN is not set")
 	}
 
-	apiKey := env.GetString("GEMINI_API_KEY", "")
+	apiKey := env.GetString("GROQ_API_KEY", "")
 	if apiKey == "" {
-		logger.Fatal("GEMINI_API_KEY is not set")
+		logger.Fatal("GROQ_API_KEY is not set")
 	}
-	aiClient, err := genai.NewClient(context.Background(), option.WithAPIKey(apiKey))
-	if err != nil {
-		logger.Fatalw("Failed to connect to Gemini", "error", err)
-	}
-	defer aiClient.Close()
+
+	config := openai.DefaultConfig(apiKey)
+	config.BaseURL = "https://api.groq.com/openai/v1"
+	aiClient := openai.NewClientWithConfig(config)
 
 	payosClientID := env.GetString("PAYOS_CLIENT_ID", "")
 	payosApiKey := env.GetString("PAYOS_API_KEY", "")
@@ -90,8 +88,13 @@ func main() {
 		ChecksumKey: payosChecksumKey,
 	})
 
+	adminGroupID := env.GetInt("GROUP_CHAT_ID", 0)
+	if adminGroupID == 0 {
+		logger.Warnw("Chưa cấu hình GROUP_CHAT_ID hợp lệ, bot sẽ không gửi thông báo vào nhóm")
+	}
+
 	store := store.NewStorage(redisClient, db)
-	service := service.NewService(store, aiClient, logger, payosClient)
+	service := service.NewService(store, aiClient, logger, payosClient, int64(adminGroupID))
 
 	service.PaymentWorker.Start(ctx, 3)
 

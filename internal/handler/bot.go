@@ -33,6 +33,10 @@ func (h *botHandler) HandleMessage(ctx context.Context, b *bot.Bot, update *mode
 		return
 	}
 
+	if update.Message.Chat.Type != "private" {
+		return
+	}
+
 	userID := update.Message.From.ID
 	text := update.Message.Text
 
@@ -55,6 +59,13 @@ func (h *botHandler) HandleMessage(ctx context.Context, b *bot.Bot, update *mode
 		}
 
 		h.aiService.ClearSession(userID)
+	}
+
+	if currentState == model.StateCompleted {
+		h.logger.Infow("User completed previous order, resetting for new order", "userID", userID)
+		h.fsmService.SetState(ctx, userID, model.StateOrdering)
+		h.aiService.ClearSession(userID)
+		currentState = model.StateOrdering
 	}
 
 	if text == "/cancel" {

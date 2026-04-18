@@ -3,8 +3,8 @@ package service
 import (
 	"lanvadip-bot/internal/store"
 
-	"github.com/google/generative-ai-go/genai"
 	"github.com/payOSHQ/payos-lib-golang/v2"
+	"github.com/sashabaranov/go-openai"
 	"go.uber.org/zap"
 )
 
@@ -14,9 +14,9 @@ type Service struct {
 	PaymentWorker PaymentWorker
 }
 
-func NewService(s store.Storage, aiClient *genai.Client, logger *zap.SugaredLogger, payosClient *payos.PayOS) Service {
+func NewService(s store.Storage, aiClient *openai.Client, logger *zap.SugaredLogger, payosClient *payos.PayOS, adminGroupID int64) Service {
 	fsmService := NewRedisFSMService(s.FSM)
-	worker := NewPaymentWorker(logger, fsmService, s.Order)
+	worker := NewPaymentWorker(logger, fsmService, s.Order, adminGroupID)
 	return Service{
 		FSM:           fsmService,
 		AI:            NewAIService(aiClient, s.Menu, logger, payosClient, fsmService, s.Order),
