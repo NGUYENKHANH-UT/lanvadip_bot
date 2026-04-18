@@ -20,19 +20,21 @@ type PaymentWorker interface {
 }
 
 type paymentWorker struct {
-	jobQueue   chan payos.WebhookData
-	logger     *zap.SugaredLogger
-	fsmService FSMService
-	tgBot      *bot.Bot
-	orderStore store.OrderStore
+	jobQueue     chan payos.WebhookData
+	logger       *zap.SugaredLogger
+	fsmService   FSMService
+	tgBot        *bot.Bot
+	orderStore   store.OrderStore
+	adminGroupID int64
 }
 
-func NewPaymentWorker(logger *zap.SugaredLogger, fsmService FSMService, orderStore store.OrderStore) PaymentWorker {
+func NewPaymentWorker(logger *zap.SugaredLogger, fsmService FSMService, orderStore store.OrderStore, adminGroupID int64) PaymentWorker {
 	return &paymentWorker{
-		jobQueue:   make(chan payos.WebhookData, 100),
-		logger:     logger,
-		fsmService: fsmService,
-		orderStore: orderStore,
+		jobQueue:     make(chan payos.WebhookData, 100),
+		logger:       logger,
+		fsmService:   fsmService,
+		orderStore:   orderStore,
+		adminGroupID: adminGroupID,
 	}
 }
 
@@ -86,11 +88,21 @@ func (w *paymentWorker) processPayment(payload payos.WebhookData) {
 
 	w.logger.Infof("Order %d PAID_SUCCESS! (UserID: %d)", orderCode, userID)
 
+	deliveryInfo, _ := w.fsmService.GetOrderDeliveryInfo(ctx, orderCode)
+	if deliveryInfo == "" {
+		deliveryInfo = "Khách lấy tại quán hoặc chưa ghi nhận địa chỉ."
+	}
+
 	if w.tgBot != nil {
 		w.tgBot.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:    userID,
 			Text:      fmt.Sprintf("🎉 DING DING! Quán đã nhận được lúa cho đơn hàng mã <b>#%d</b> rồi nha Cục dàng ơi. Quán đang bắt tay vào làm nước liền đây! 🥤", orderCode),
 			ParseMode: "HTML",
+		})
+
+		w.tgBot.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID: w.adminGroupID,
+			Text:   fmt.Sprintf("🚨 TING TING! CÓ ĐƠN MỚI ĐÃ THANH TOÁN 🚨\n\n- Mã đơn: #%d\n- %s\n\nĐề nghị bếp chuẩn bị món!", orderCode, deliveryInfo),
 		})
 	}
 }
