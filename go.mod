@@ -8,6 +8,7 @@ require (
 	github.com/go-telegram/bot v1.20.0
 	github.com/google/generative-ai-go v0.20.1
 	github.com/mattn/go-sqlite3 v1.14.42
+	github.com/payOSHQ/payos-lib-golang/v2 v2.0.1
 	github.com/redis/go-redis/v9 v9.18.0
 	github.com/swaggo/http-swagger/v2 v2.0.2
 	github.com/swaggo/swag v1.16.6

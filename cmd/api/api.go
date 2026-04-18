@@ -11,15 +11,18 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/payOSHQ/payos-lib-golang/v2"
 	httpSwagger "github.com/swaggo/http-swagger/v2"
 	"go.uber.org/zap"
 )
 
 type application struct {
-	config  config
-	logger  *zap.SugaredLogger
-	server  *http.Server
-	service service.Service
+	config        config
+	logger        *zap.SugaredLogger
+	server        *http.Server
+	service       service.Service
+	payosClient   *payos.PayOS
+	paymentWorker service.PaymentWorker
 }
 
 type config struct {
@@ -37,10 +40,12 @@ func (app *application) mount() http.Handler {
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(60 * time.Second))
 
-	h := handler.NewHandler(app.config.version, app.config.env, app.logger)
+	h := handler.NewHandler(app.config.version, app.config.env, app.logger, app.payosClient, app.paymentWorker)
 
 	r.Route("/v1", func(r chi.Router) {
 		r.Route("/health", h.Health.HealthRoute)
+
+		r.Post("/webhook/payos", h.Webhook.HandlePayOSWebhook)
 
 		docsURL := fmt.Sprintf("%s/swagger/doc.json", app.config.addr)
 		r.Get("/swagger/*", httpSwagger.Handler(httpSwagger.URL(docsURL)))
