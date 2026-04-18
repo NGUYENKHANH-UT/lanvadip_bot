@@ -2,53 +2,76 @@ package handler
 
 import (
 	"context"
+	"lanvadip-bot/internal/model"
 	"lanvadip-bot/internal/service"
-	"lanvadip-bot/internal/store"
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 	"go.uber.org/zap"
 )
 
-type BotHandler struct {
+type botHandler struct {
 	logger     *zap.SugaredLogger
 	fsmService service.FSMService
+	aiService  service.AIService
 }
 
-func NewBotHandler(logger *zap.SugaredLogger, fsmService service.FSMService) *BotHandler {
-	return &BotHandler{
+type BotHandler interface {
+	HandleMessage(ctx context.Context, b *bot.Bot, update *models.Update)
+}
+
+func NewBotHandler(logger *zap.SugaredLogger, fsmService service.FSMService, aiService service.AIService) BotHandler {
+	return &botHandler{
 		logger:     logger,
 		fsmService: fsmService,
+		aiService:  aiService,
 	}
 }
 
-func (h *BotHandler) HandleMessage(ctx context.Context, b *bot.Bot, update *models.Update) {
+func (h *botHandler) HandleMessage(ctx context.Context, b *bot.Bot, update *models.Update) {
 	if update.Message == nil {
 		return
 	}
 
 	userID := update.Message.From.ID
+	text := update.Message.Text
 
 	currentState, err := h.fsmService.GetState(ctx, userID)
 	if err != nil {
-		h.logger.Errorw("Get state error", "error", err, "userID", userID)
-		return
+		h.logger.Errorw("failed to get user state from FSM", "error", err, "userID", userID)
+		currentState = model.StateStart
 	}
 
-	h.logger.Infow("New message", "userID", userID, "state", currentState)
+	h.logger.Infow("received new message", "userID", userID, "state", currentState, "text_length", len(text))
 
-	switch currentState {
-	case store.StateStart:
-		b.SendMessage(ctx, &bot.SendMessageParams{
-			ChatID: update.Message.Chat.ID,
-			Text:   "Chào cục dàng, quán trà sữa Lan và Địp xin nghe! Cục dàng muốn xem menu chứ?",
-		})
-		h.fsmService.SetState(ctx, userID, store.StateOrdering)
-
-	case store.StateOrdering:
-		b.SendMessage(ctx, &bot.SendMessageParams{
-			ChatID: update.Message.Chat.ID,
-			Text:   "Cục dàng hôm nay muốn uống gì nè!",
-		})
+	if currentState == model.StateStart {
+		err = h.fsmService.SetState(ctx, userID, model.StateOrdering)
+		if err != nil {
+			h.logger.Errorw("failed to update user state to ORDERING", "error", err, "userID", userID)
+		}
 	}
+
+	if currentState == model.StateOrdering || currentState == model.StateStart {
+		aiResponse, err := h.aiService.AnalyzeAndRespond(ctx, userID, text)
+
+		if err != nil {
+			h.logger.Errorw("failed to get AI response", "error", err, "userID", userID)
+
+			b.SendMessage(ctx, &bot.SendMessageParams{
+				ChatID: update.Message.Chat.ID,
+				Text:   "Dạ hệ thống quán đang bảo trì chút xíu, cục dàng chờ xíu rồi nhắn lại giúp quán nha! 🧋",
+			})
+			return
+		}
+
+		_, err = b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID: update.Message.Chat.ID,
+			Text:   aiResponse,
+		})
+
+		if err != nil {
+			h.logger.Errorw("failed to send message via Telegram API", "error", err, "userID", userID)
+		}
+	}
+
 }
