@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +18,29 @@ import (
 )
 
 const groqModel = "llama-3.3-70b-versatile"
+
+// Match tất cả HTML tags, sau đó giữ lại các tag hợp lệ của Telegram
+var anyTagRegex = regexp.MustCompile(`<[^>]+>`)
+var validTags = map[string]bool{
+	"b": true, "/b": true,
+	"i": true, "/i": true,
+	"code": true, "/code": true,
+	"pre": true, "/pre": true,
+	"a": true, "/a": true,
+}
+
+func sanitizeTelegramHTML(text string) string {
+	return anyTagRegex.ReplaceAllStringFunc(text, func(tag string) string {
+		// Lấy tên tag (bỏ < > và attributes)
+		inner := strings.TrimPrefix(tag, "<")
+		inner = strings.TrimSuffix(inner, ">")
+		tagName := strings.ToLower(strings.Fields(inner)[0])
+		if validTags[tagName] {
+			return tag
+		}
+		return ""
+	})
+}
 
 type AIService interface {
 	AnalyzeAndRespond(ctx context.Context, userID int64, message string) (string, error)
@@ -47,7 +71,11 @@ LƯU Ý QUAN TRỌNG:
 2. QUY TRÌNH CHỐT ĐƠN (Phải thực hiện theo đúng thứ tự):
 - Bước 1 (Lấy thông tin): Khi khách muốn chốt đơn (ví dụ: "chốt", "tính tiền", "ok lấy đi"), BẮT BUỘC PHẢI kiểm tra xem đã có đủ 3 thông tin chưa: Tên người nhận, Số điện thoại và Địa chỉ giao. Nếu thiếu bất kỳ thông tin nào, phải hỏi khách cho đủ. (Thời gian giao mặc định là "Càng sớm càng tốt" nếu khách không dặn).
 - Bước 2 (Gọi hàm thanh toán): TUYỆT ĐỐI KHÔNG gọi hàm checkout khi chưa đủ thông tin. CHỈ GỌI hàm checkout KHI VÀ CHỈ KHI đã có đầy đủ danh sách món VÀ 3 thông tin giao hàng.
-- Bước 3 (Gửi link): Sau khi hàm checkout thực thi thành công, hãy gửi Link thanh toán cho khách và nói rõ: "Dạ Cục dàng nhấn vào link để quét mã QR thanh toán nha!".`
+- Bước 3 (Gửi link): Sau khi hàm checkout thực thi thành công, hãy gửi Link thanh toán cho khách và nói rõ: "Dạ Cục dàng nhấn vào link để quét mã QR thanh toán nha!".
+
+3. VỀ FORMAT TRẢ LỜI:
+- TUYỆT ĐỐI KHÔNG được viết <function=...>, <tool>, hay bất kỳ XML/function tag nào trong câu trả lời.
+- Câu trả lời chỉ được chứa text thuần và các HTML tag hợp lệ của Telegram: <b>, <i>, <code>, <a>, <pre>.`
 
 var tools = []openai.Tool{
 	{
@@ -336,6 +364,12 @@ func (s *aiService) AnalyzeAndRespond(ctx context.Context, userID int64, message
 			Tools:    tools,
 		})
 		if err != nil {
+			// Nếu lỗi 400, thử lại với history rút gọn để tránh context bị corrupt
+			if strings.Contains(err.Error(), "400") && len(history) > 2 {
+				s.logger.Warnw("Groq 400 error, retrying with truncated history", "userID", userID, "attempt", i)
+				history = history[len(history)-2:]
+				continue
+			}
 			return "", fmt.Errorf("failed to call Groq API: %w", err)
 		}
 
@@ -361,7 +395,9 @@ func (s *aiService) AnalyzeAndRespond(ctx context.Context, userID int64, message
 					finalText = strings.ReplaceAll(finalText, "[[MENU_CONTENT]]", cached.(string))
 				}
 			}
-			return finalText, nil
+
+			// Sanitize để loại bỏ các tag không hợp lệ với Telegram HTML
+			return sanitizeTelegramHTML(finalText), nil
 		}
 
 		history = append(history, choice.Message)
